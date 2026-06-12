@@ -19,16 +19,26 @@ import os
 from duckduckgo_search import DDGS
 
 def buscar_cartaz(nome_obra):
-    """Busca o link de uma imagem de cartaz no formato ideal"""
+    """Busca o link de uma imagem de cartaz tratando erros de forma segura"""
+    if not nome_obra:
+        return None
+        
     try:
-        # Pesquisa especificamente por posters/cartazes para evitar imagens aleatórias
-        termo_busca = f"{nome_obra} movie poster/book cover portrait"
-        with DDGS() as ddgs:
-            resultados = list(ddgs.images(termo_busca, max_results=1))
-            if resultados:
-                return resultados[0]['image'] # Retorna a URL direta da imagem
+        from duckduckgo_search import DDGS
+        termo_busca = f"{nome_obra} movie poster portrait"
+        
+        # Versão simplificada e direta sem travar o loop
+        ddgs = DDGS()
+        resultados = ddgs.images(termo_busca, max_results=1)
+        
+        if resultados and len(resultados) > 0:
+            return resultados[0].get('image')
+            
     except Exception as e:
-        print(print(f"Erro ao buscar imagem: {e}"))
+        # Se der qualquer erro de rede, biblioteca ou bloqueio, o sistema apenas ignora a imagem 
+        # e deixa o chat funcionar normalmente sem derrubar o servidor (Crash status 1)
+        print(f"Aviso silencioso: Erro ao buscar imagem para '{nome_obra}': {e}")
+        
     return None
 
 # --- DENTRO DA SUA FUNÇÃO DE CHAT (Onde a IA responde) ---

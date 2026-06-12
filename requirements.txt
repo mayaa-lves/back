@@ -6,3 +6,4 @@ python-dotenv
 gunicorn
 gevent
 gevent-websocket
+duckduckgo_search
