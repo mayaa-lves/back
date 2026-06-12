@@ -20,20 +20,18 @@ load_dotenv()
 
 MODELO = "gemini-3.1-flash-lite"
 
-# 🌟 SUAS DIRETRIZES TOTAIS MANTIDAS E INTEGRADAS COM A BUSCA DE IMAGENS 🌟
 instrucoes = """
     Você é o "Cineasta sugestor de entreterimento" (seu nome é Pixel), um assistente inteligente, empático e com um gosto cultural refinado. Seu objetivo é ajudar o usuário a encontrar o entretenimento perfeito (filmes, séries ou livros) com base no estado emocional e no perfil de preferências dele.
 
     DIRETRIZES DE FLUXO E COMPORTAMENTO:
 
     1. O Início (Apresentação e Investigação):
-    - Na primeiríssima mensagem, apresente-se brevemente como o "Cineasta & sugestor de entreterimento" com entusiasmo.
-    - Inicie a fase de descoberta fazendo perguntas para conhecer o gosto do usuário. ATENÇÃO: faça APENAS UMA pergunta por vez para manter a conversa fluida e natural e em mensagens curtas para ser uma conversa leve mas acolhedora.
+    - Na primeiríssima mensagem, apresente-se brevemente como o "Cineasta & Curador" com entusiasmo.
+    - Inicie a fase de descoberta fazendo perguntas para conhecer o gosto do usuário. ATENÇÃO: faça APENAS UMA pergunta por vez para manter a conversa fluida e natural.
     - Descubra primeiro o formato desejado (Filme, Série ou Livro), depois as preferências de gênero/estilo e, por fim, o humor ou estado emocional atual.
 
     2. Respostas Curtas, mas Completas:
     - Quando for recomendar, seja direto. Evite rodeios ou blocos longos de texto. Entregue o máximo de valor com o mínimo de palavras.
-    - Nao deixe as mensagens amontuadas, ou seja, separe os topicos para facilitar a leitura do usuario e evitar uma leitura cansativa
 
     3. Justificativa Emocional e Curadoria:
     - Apresente apenas 2 ou 3 opções cirúrgicas.
@@ -45,7 +43,7 @@ instrucoes = """
     - Direitos Autorais e Legalidade: Respeite rigorosamente as leis de direitos autorais. Nunca forneça links de pirataria, downloads ilegais ou transmissões não autorizadas. Se o usuário pedir caminhos ilegais, recuse gentilmente, explique a importância de apoiar os criadores e redirecione-o para plataformas oficiais e legítimas.
 
     5. Tom de Voz:
-    - Caloroso, legal, intelectual porém acessível, ético, prestativo e entusiasta da arte.
+    - Caloroso, intelectual porém acessível, ético, prestativo e entusiasta da arte.
 
     ---
 
@@ -71,24 +69,21 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 active_chats = {}
 
 def buscar_cartaz(nome_obra):
-    """Busca o link de uma imagem de cartaz na internet de forma segura usando a nova sintaxe"""
+    """Busca a imagem tratando erros de forma robusta com o parâmetro obrigatório keywords"""
     if not nome_obra:
         return None
-        
     try:
         from duckduckgo_search import DDGS
-        termo_busca = f"{nome_obra} movie book poster portrait"
+        # Limpa caracteres residuais como colchetes soltos ou pontos finais
+        nome_limpo = nome_obra.replace('[', '').replace(']', '').replace('.', '').strip()
+        termo_busca = f"{nome_limpo} movie book poster portrait"
         
         ddgs = DDGS()
-        # Uso correto do parâmetro keywords para evitar o erro do log
         resultados = ddgs.images(keywords=termo_busca, max_results=1)
-        
         if resultados and len(resultados) > 0:
             return resultados[0].get('image')
-            
     except Exception as e:
-        print(f"Aviso silencioso: Erro ao buscar imagem para '{nome_obra}': {e}")
-        
+        print(f"Erro na busca do DuckDuckGo: {e}")
     return None
 
 def get_user_chat():
@@ -120,46 +115,34 @@ def handle_connect():
 def handle_enviar_mensagem(data):
     try:
         mensagem_usuario = data.get("mensagem")
-        app.logger.info(f"Mensagem recebida de {session.get('session_id', request.sid)}: {mensagem_usuario}")
-
         if not mensagem_usuario:
-            emit('erro', {"erro": "Mensagem não pode ser vazia."})
             return
 
         user_chat = get_user_chat()
-        if user_chat is None:
-            emit('erro', {"erro": "Sessão de chat não pôde ser estabelecida."})
-            return
-
         resposta_gemini = user_chat.send_message(mensagem_usuario)
-
-        resposta_texto = (
-            resposta_gemini.text
-            if hasattr(resposta_gemini, 'text')
-            else resposta_gemini.candidates[0].content.parts[0].text
-        )
+        resposta_texto = resposta_gemini.text if hasattr(resposta_gemini, 'text') else resposta_gemini.candidates[0].content.parts[0].text
         
-        # Faz a varredura para extrair o nome da obra e buscar a imagem
+        # 🌟 BUSCA ROBUSTA: Captura o nome independente de espaços ou pontos colados
         url_cartaz = None
-        match = re.search(r'\[Mídia:\s*(.*?)\]', resposta_texto)
+        match = re.search(r'\[Mídia:\s*(.*?)\]', resposta_texto, re.IGNORECASE)
         if match:
             nome_da_midia = match.group(1).strip()
             url_cartaz = buscar_cartaz(nome_da_midia)
-            
-        # Remove a tag técnica do texto antes de renderizar na tela
-        texto_limpo = re.sub(r'\[Mídia:\s*(.*?)\]', '', resposta_texto).strip()
+        
+        # 🌟 MUDANÇA CRÍTICA: Não apagamos mais via regex violento para evitar o sumiço do texto!
+        # Apenas removemos a linha exata do [Mídia: ...] de forma limpa.
+        linhas = resposta_texto.split('\n')
+        linhas_filtradas = [l for l in list(linhas) if not l.strip().startswith('[Mídia:')]
+        texto_limpo = '\n'.join(linhas_filtradas).strip()
 
-        # Envia de volta estruturado para o script.js ler perfeitamente
         emit('nova_mensagem', {
             "remetente": "bot", 
             "texto": texto_limpo, 
             "cartaz": url_cartaz,
             "session_id": session.get('session_id')
         })
-        app.logger.info(f"Resposta enviada com sucesso.")
 
     except Exception as e:
-        app.logger.error(f"Erro ao processar 'enviar_mensagem': {e}")
         emit('erro', {"erro": f"Erro interno no servidor: {str(e)}"})
 
 if __name__ == "__main__":
