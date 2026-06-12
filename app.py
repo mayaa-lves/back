@@ -4,7 +4,7 @@ if sys.platform != "win32":
     try:
         from gevent import monkey
         # Desativamos o patch de SSL para evitar o conflito com a biblioteca do Gemini
-        monkey.patch_all(ssl=False)
+        monkey.patch_all()
     except ImportError:
         print("Gevent não instalado!")
 
@@ -18,7 +18,7 @@ import os
 
 load_dotenv()
 
-MODELO = "gemini-2.5-flash"
+MODELO = "gemini-3.1-flash-lite"
 
 # "Prompt de Sistema". 
 instrucoes = """
@@ -157,4 +157,4 @@ def handle_disconnect():
 
 
 if __name__ == "__main__":
-    socketio.run(app, port=6500)
+    socketio.run(app)
