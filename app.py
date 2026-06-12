@@ -3,7 +3,8 @@ import sys
 if sys.platform != "win32":
     try:
         from gevent import monkey
-        monkey.patch_all()
+        # Desativamos o patch de SSL para evitar o conflito com a biblioteca do Gemini
+        monkey.patch_all(ssl=False)
     except ImportError:
         print("Gevent não instalado!")
 
