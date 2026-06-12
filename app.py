@@ -16,6 +16,39 @@ from dotenv import load_dotenv
 from uuid import uuid4
 import os
 
+from duckduckgo_search import DDGS
+
+def buscar_cartaz(nome_obra):
+    """Busca o link de uma imagem de cartaz no formato ideal"""
+    try:
+        # Pesquisa especificamente por posters/cartazes para evitar imagens aleatórias
+        termo_busca = f"{nome_obra} movie poster/book cover portrait"
+        with DDGS() as ddgs:
+            resultados = list(ddgs.images(termo_busca, max_results=1))
+            if resultados:
+                return resultados[0]['image'] # Retorna a URL direta da imagem
+    except Exception as e:
+        print(print(f"Erro ao buscar imagem: {e}"))
+    return None
+
+# --- DENTRO DA SUA FUNÇÃO DE CHAT (Onde a IA responde) ---
+# Imagine que a IA gerou a resposta e detectou que sugeriu um filme.
+# Em vez de enviar só o texto bruto, você enviará um dicionário (JSON):
+
+resposta_ia = "Minha indicação de hoje é o filme **Interstellar**. É uma obra prima da ficção científica!"
+obra_sugerida = "Interstellar" # Você pode fazer sua IA extrair o nome puro ou usar Regex
+
+# Busca o link da imagem na internet
+url_cartaz = buscar_cartaz(obra_sugerida)
+
+# Quando for enviar para o front-end via Socket ou JSON, envie assim:
+dados_para_enviar = {
+    "texto": resposta_ia,
+    "cartaz": url_cartaz # Envia a URL encontrada (ou None se não achar)
+}
+
+# Exemplo se for Socket.IO:
+# socketio.emit('bot_message', dados_para_enviar)
 
 load_dotenv()
 
