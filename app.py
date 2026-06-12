@@ -14,12 +14,12 @@ from google.genai import types
 from dotenv import load_dotenv
 from uuid import uuid4
 import os
-import re
 
 load_dotenv()
 
 MODELO = "gemini-3.1-flash-lite"
 
+# Sua instrução exata de comportamento e fluxo, sem lógicas de imagens
 instrucoes = """
     Você é o "Cineasta sugestor de entreterimento" (seu nome é Pixel), um assistente inteligente, empático e com um gosto cultural refinado. Seu objetivo é ajudar o usuário a encontrar o entretenimento perfeito (filmes, séries ou livros) com base no estado emocional e no perfil de preferências dele.
 
@@ -35,7 +35,7 @@ instrucoes = """
 
     3. Justificativa Emocional e Curadoria:
     - Apresente apenas 2 ou 3 opções cirúrgicas.
-    - Para cada sugestão, inclua uma linha curta explicando o "Porquê" (a conexão exata entre a obra e o momento do usuário).
+    - Para cada sugestão, inclua uma linha corta explicando o "Porquê" (a conexão exata entre a obra e o momento do usuário).
     - Equilibre a curadoria entre clássicos, blockbusters e "hidden gems" (obras menos conhecidas).
 
     4. Segurança, Ética e Integridade (Diretrizes Estritas):
@@ -47,18 +47,16 @@ instrucoes = """
 
     ---
 
-    FORMATO PADRÃO DE RECOMENDAÇÃO (SIGA DETALHADAMENTE):
+    FORMATO PADRÃO DE RECOMENDAÇÃO:
 
     [Saudação breve e empática conectada ao humor do usuário]
 
-    * **[Título da Obra 1]** ([Ano] - [Gênero])
+    * **[Título da Obra]** ([Ano] - [Gênero])
     * **O porquê:** [Frase curta e impactante justificando a escolha].
-    * **[Título da Obra 2]** ([Ano] - [Gênero])
+    * **[Título da Obra]** ([Ano] - [Gênero])
     * **O porquê:** [Frase curta e impactante justificando a escolha].
 
     [Call to Action: Pergunta curta se o usuário quer saber em quais plataformas oficiais encontrar a obra ou se prefere mudar a rota].
-
-    [Mídia: Escreva Aqui o Nome Exato da Obra 1]
 """
 
 client = genai.Client(api_key=os.getenv("GENAI_KEY"))
@@ -67,24 +65,6 @@ app.secret_key = "ch@tb07"
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 active_chats = {}
-
-def buscar_cartaz(nome_obra):
-    """Busca a imagem tratando erros de forma robusta com o parâmetro obrigatório keywords"""
-    if not nome_obra:
-        return None
-    try:
-        from duckduckgo_search import DDGS
-        # Limpa caracteres residuais como colchetes soltos ou pontos finais
-        nome_limpo = nome_obra.replace('[', '').replace(']', '').replace('.', '').strip()
-        termo_busca = f"{nome_limpo} movie book poster portrait"
-        
-        ddgs = DDGS()
-        resultados = ddgs.images(keywords=termo_busca, max_results=1)
-        if resultados and len(resultados) > 0:
-            return resultados[0].get('image')
-    except Exception as e:
-        print(f"Erro na busca do DuckDuckGo: {e}")
-    return None
 
 def get_user_chat():
     if 'session_id' not in session:
@@ -122,28 +102,14 @@ def handle_enviar_mensagem(data):
         resposta_gemini = user_chat.send_message(mensagem_usuario)
         resposta_texto = resposta_gemini.text if hasattr(resposta_gemini, 'text') else resposta_gemini.candidates[0].content.parts[0].text
         
-        # 🌟 BUSCA ROBUSTA: Captura o nome independente de espaços ou pontos colados
-        url_cartaz = None
-        match = re.search(r'\[Mídia:\s*(.*?)\]', resposta_texto, re.IGNORECASE)
-        if match:
-            nome_da_midia = match.group(1).strip()
-            url_cartaz = buscar_cartaz(nome_da_midia)
-        
-        # 🌟 MUDANÇA CRÍTICA: Não apagamos mais via regex violento para evitar o sumiço do texto!
-        # Apenas removemos a linha exata do [Mídia: ...] de forma limpa.
-        linhas = resposta_texto.split('\n')
-        linhas_filtradas = [l for l in list(linhas) if not l.strip().startswith('[Mídia:')]
-        texto_limpo = '\n'.join(linhas_filtradas).strip()
-
         emit('nova_mensagem', {
             "remetente": "bot", 
-            "texto": texto_limpo, 
-            "cartaz": url_cartaz,
+            "texto": resposta_texto, 
             "session_id": session.get('session_id')
         })
 
     except Exception as e:
-        emit('erro', {"erro": f"Erro interno no servidor: {str(e)}"})
+        emit('erro', {"erro": f"Erro interno: {str(e)}"})
 
 if __name__ == "__main__":
     socketio.run(app)
