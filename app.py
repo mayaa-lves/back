@@ -3,7 +3,6 @@ import sys
 if sys.platform != "win32":
     try:
         from gevent import monkey
-        # Desativamos o patch de SSL para evitar o conflito com a biblioteca do Gemini
         monkey.patch_all()
     except ImportError:
         print("Gevent não instalado!")
@@ -15,56 +14,13 @@ from google.genai import types
 from dotenv import load_dotenv
 from uuid import uuid4
 import os
-
-from duckduckgo_search import DDGS
-
-def buscar_cartaz(nome_obra):
-    """Busca o link de uma imagem de cartaz tratando erros de forma segura"""
-    if not nome_obra:
-        return None
-        
-    try:
-        from duckduckgo_search import DDGS
-        termo_busca = f"{nome_obra} movie poster portrait"
-        
-        # Versão simplificada e direta sem travar o loop
-        ddgs = DDGS()
-        resultados = ddgs.images(termo_busca, max_results=1)
-        
-        if resultados and len(resultados) > 0:
-            return resultados[0].get('image')
-            
-    except Exception as e:
-        # Se der qualquer erro de rede, biblioteca ou bloqueio, o sistema apenas ignora a imagem 
-        # e deixa o chat funcionar normalmente sem derrubar o servidor (Crash status 1)
-        print(f"Aviso silencioso: Erro ao buscar imagem para '{nome_obra}': {e}")
-        
-    return None
-
-# --- DENTRO DA SUA FUNÇÃO DE CHAT (Onde a IA responde) ---
-# Imagine que a IA gerou a resposta e detectou que sugeriu um filme.
-# Em vez de enviar só o texto bruto, você enviará um dicionário (JSON):
-
-resposta_ia = "Minha indicação de hoje é o filme **Interstellar**. É uma obra prima da ficção científica!"
-obra_sugerida = "Interstellar" # Você pode fazer sua IA extrair o nome puro ou usar Regex
-
-# Busca o link da imagem na internet
-url_cartaz = buscar_cartaz(obra_sugerida)
-
-# Quando for enviar para o front-end via Socket ou JSON, envie assim:
-dados_para_enviar = {
-    "texto": resposta_ia,
-    "cartaz": url_cartaz # Envia a URL encontrada (ou None se não achar)
-}
-
-# Exemplo se for Socket.IO:
-# socketio.emit('bot_message', dados_para_enviar)
+import re
 
 load_dotenv()
 
 MODELO = "gemini-3.1-flash-lite"
 
-# "Prompt de Sistema". 
+# 🌟 SUAS DIRETRIZES TOTAIS MANTIDAS E INTEGRADAS COM A BUSCA DE IMAGENS 🌟
 instrucoes = """
     Você é o "Cineasta sugestor de entreterimento" (seu nome é Pixel), um assistente inteligente, empático e com um gosto cultural refinado. Seu objetivo é ajudar o usuário a encontrar o entretenimento perfeito (filmes, séries ou livros) com base no estado emocional e no perfil de preferências dele.
 
@@ -85,7 +41,7 @@ instrucoes = """
 
     4. Segurança, Ética e Integridade (Diretrizes Estritas):
     - Saúde e Moralidade: Você NUNCA deve responder ou sugerir conteúdos ofensivos, preconceituosos, violentos ou que possam, de qualquer forma, afetar negativamente a saúde mental, física e a moralidade de qualquer ser vivo.
-    - Direitos Autorais e Legalidade: Respeite rigorosamente as leis de direitos autorais. Nunca forneça links de pirataria, downloads ilegais ou transmissões não autorizadas. Se o usuário pedir caminhos ilegais, recuse gentilmente, explique a importância de apoiar os criadores e redirecione-o para plataformas oficiais e legítimas.
+    - Direitos Autorais e Legalidade: Respeite rigorosamente as leis de direitos autorais. Nunca forneceça links de pirataria, downloads ilegais ou transmissões não autorizadas. Se o usuário pedir caminhos ilegais, recuse gentilmente, explique a importância de apoiar os criadores e redirecione-o para plataformas oficiais e legítimas.
 
     5. Tom de Voz:
     - Caloroso, intelectual porém acessível, ético, prestativo e entusiasta da arte.
@@ -102,76 +58,62 @@ instrucoes = """
     * **O porquê:** [Frase curta e impactante justificando a escolha].
 
     [Call to Action: Pergunta curta se o usuário quer saber em quais plataformas oficiais encontrar a obra ou se prefere mudar a rota].
+
+    REQUISITO TÉCNICO INVISÍVEL: Sempre que você fizer a recomendação final seguindo o formato acima, adicione discretamente na última linha do texto o marcador da mídia principal recomendada no formato exato: [Mídia: Nome da Primeira Obra]. Isso serve para o sistema buscar o cartaz correspondente.
 """
 
 client = genai.Client(api_key=os.getenv("GENAI_KEY"))
-
 app = Flask(__name__)
-
 app.secret_key = "ch@tb07"
-
-
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 active_chats = {}
 
+def buscar_cartaz(nome_obra):
+    """Busca o link de uma imagem de cartaz na internet de forma segura usando a nova sintaxe"""
+    if not nome_obra:
+        return None
+        
+    try:
+        from duckduckgo_search import DDGS
+        termo_busca = f"{nome_obra} movie book poster portrait"
+        
+        ddgs = DDGS()
+        # Uso correto do parâmetro keywords para evitar o erro do log
+        resultados = ddgs.images(keywords=termo_busca, max_results=1)
+        
+        if resultados and len(resultados) > 0:
+            return resultados[0].get('image')
+            
+    except Exception as e:
+        print(f"Aviso silencioso: Erro ao buscar imagem para '{nome_obra}': {e}")
+        
+    return None
+
 def get_user_chat():
     if 'session_id' not in session:
         session['session_id'] = str(uuid4())
-        print(f"Nova sessão Flask criada: {session['session_id']}")
-
     session_id = session['session_id']
 
-    if session_id not in active_chats:
-        print(f"Criando novo chat Gemini para session_id: {session_id}")
-        try:
-            chat_session = client.chats.create(
-                model=MODELO,
-                config=types.GenerateContentConfig(system_instruction=instrucoes)
-            )
-            active_chats[session_id] = chat_session
-            print(f"Novo chat Gemini criado e armazenado para {session_id}")
-        except Exception as e:
-            app.logger.error(f"Erro ao criar chat Gemini para {session_id}: {e}", exc_info=True)
-            raise  
-
-    if session_id in active_chats and active_chats[session_id] is None:
-        print(f"Recriando chat Gemini para session_id existente (estava None): {session_id}")
-        try:
-            chat_session = client.chats.create(
-                model=MODELO,
-                config=types.GenerateContentConfig(system_instruction=instrucoes)
-            )
-            active_chats[session_id] = chat_session
-        except Exception as e:
-            app.logger.error(f"Erro ao recriar chat Gemini para {session_id}: {e}", exc_info=True)
-            raise
-
+    if session_id not in active_chats or active_chats[session_id] is None:
+        chat_session = client.chats.create(
+            model=MODELO,
+            config=types.GenerateContentConfig(system_instruction=instrucoes)
+        )
+        active_chats[session_id] = chat_session
     return active_chats[session_id]
-
 
 @app.route('/')
 def root():
-    return jsonify({
-        "api-websocket": "chatbot",
-        "status": "ok"
-    })
-
+    return jsonify({"api-websocket": "chatbot", "status": "ok"})
 
 @socketio.on('connect')
 def handle_connect():
-    print(f"Cliente conectado: {request.sid}")
-    
     try:
         get_user_chat()
-        user_session_id = session.get('session_id', 'N/A')
-        print(f"Sessão Flask para {request.sid} usa session_id: {user_session_id}")
-        
-        emit('status_conexao', {'data': 'Conectado com sucesso!', 'session_id': user_session_id})
+        emit('status_conexao', {'data': 'Conectado com sucesso!', 'session_id': session.get('session_id')})
     except Exception as e:
-        app.logger.error(f"Erro durante o evento connect para {request.sid}: {e}", exc_info=True)
-        emit('erro', {'erro': 'Falha ao inicializar a sessão de chat no servidor.'})
-
+        emit('erro', {'erro': 'Falha ao inicializar a sessão de chat.'})
 
 @socketio.on('enviar_mensagem')
 def handle_enviar_mensagem(data):
@@ -196,18 +138,28 @@ def handle_enviar_mensagem(data):
             else resposta_gemini.candidates[0].content.parts[0].text
         )
         
-        emit('nova_mensagem', {"remetente": "bot", "texto": resposta_texto, "session_id": session.get('session_id')})
-        app.logger.info(f"Resposta enviada para {session.get('session_id', request.sid)}: {resposta_texto}")
+        # Faz a varredura para extrair o nome da obra e buscar a imagem
+        url_cartaz = None
+        match = re.search(r'\[Mídia:\s*(.*?)\]', resposta_texto)
+        if match:
+            nome_da_midia = match.group(1).strip()
+            url_cartaz = buscar_cartaz(nome_da_midia)
+            
+        # Remove a tag técnica do texto antes de renderizar na tela
+        texto_limpo = re.sub(r'\[Mídia:\s*(.*?)\]', '', resposta_texto).strip()
+
+        # Envia de volta estruturado para o script.js ler perfeitamente
+        emit('nova_mensagem', {
+            "remetente": "bot", 
+            "texto": texto_limpo, 
+            "cartaz": url_cartaz,
+            "session_id": session.get('session_id')
+        })
+        app.logger.info(f"Resposta enviada com sucesso.")
 
     except Exception as e:
-        app.logger.error(f"Erro ao processar 'enviar_mensagem' para {session.get('session_id', request.sid)}: {e}", exc_info=True)
-        emit('erro', {"erro": f"Ocorreu um erro no servidor: {str(e)}"})
-
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    print(f"Cliente desconectado: {request.sid}, session_id: {session.get('session_id', 'N/A')}")
-
+        app.logger.error(f"Erro ao processar 'enviar_mensagem': {e}")
+        emit('erro', {"erro": f"Erro interno no servidor: {str(e)}"})
 
 if __name__ == "__main__":
     socketio.run(app)
