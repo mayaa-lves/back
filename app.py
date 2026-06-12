@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from uuid import uuid4
 import os
 
+
 load_dotenv()
 
 MODELO = "gemini-3.1-flash-lite"
